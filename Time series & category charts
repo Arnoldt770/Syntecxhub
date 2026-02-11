@@ -1,96 +1,404 @@
+"""
+PROJECT 1: TIME SERIES ANALYSIS
+Water Quality & Disease Trends (2000-2024)
+Author: Mr AT Matlou
+Date: 11 February 2026
+"""
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy import stats
+from sklearn.linear_model import LinearRegression
 
-# Generate minimal sample data
-np.random.seed(42)
-dates = pd.date_range('2023-01-01', '2023-12-31', freq='D')
-df = pd.DataFrame({
-    'date': dates,
-    'sales': np.random.normal(1000, 200, len(dates)) + np.sin(np.arange(len(dates)) * 2 * np.pi / 30) * 300,
-    'category': np.random.choice(['Electronics', 'Clothing', 'Books', 'Home'], len(dates), p=[0.3, 0.4, 0.15, 0.15])
+# Set style
+plt.style.use('seaborn-v0_8-darkgrid')
+sns.set_palette("Set2")
+plt.rcParams['figure.figsize'] = (14, 8)
+
+# ============================================
+# PART 1: LOAD AND PREPARE TIME SERIES DATA
+# ============================================
+
+print("=" * 60)
+print("TIME SERIES ANALYSIS: Water Quality & Disease Trends")
+print("=" * 60)
+
+# Load dataset
+df = pd.read_csv('water_pollution_disease.csv')
+print(f"\n✓ Dataset loaded: {df.shape[0]} observations, {df.shape[1]} variables")
+print(f"✓ Time range: {df['Year'].min()} to {df['Year'].max()} ({df['Year'].nunique()} years)")
+
+# Create proper datetime index
+df['Date'] = pd.to_datetime(df['Year'], format='%Y')
+df.set_index('Date', inplace=True)
+df.sort_index(inplace=True)
+
+# Verify time series structure
+print(f"\n✓ Time series index created: {df.index.min().year} to {df.index.max().year}")
+print(f"✓ Frequency: Annual data (1 observation per year per country/region)")
+
+# ============================================
+# PART 2: COUNTRY-LEVEL TIME TRENDS
+# ============================================
+
+print("\n" + "=" * 60)
+print("PART 2: COUNTRY-LEVEL DISEASE TRENDS")
+print("=" * 60)
+
+# Calculate annual average diarrheal cases by country
+annual_diarrhea = df.groupby([df.index.year, 'Country'])['Diarrheal Cases per 100,000 people'].mean().unstack()
+
+print("\n✓ Annual diarrhea rates by country (first 5 years):")
+print(annual_diarrhea.head())
+
+# Calculate percent change 2000 vs 2024 (or closest available)
+def calculate_improvement(country_data):
+    years = country_data.index
+    start_year = min(years, key=lambda x: abs(x - 2000))
+    end_year = min(years, key=lambda x: abs(x - 2024))
+    
+    start_val = country_data.loc[start_year]
+    end_val = country_data.loc[end_year]
+    
+    if pd.notna(start_val) and pd.notna(end_val) and start_val > 0:
+        pct_change = ((end_val - start_val) / start_val) * 100
+        return {
+            'Country': country_data.name,
+            'Start_Year': start_year,
+            'Start_Rate': round(start_val, 1),
+            'End_Year': end_year,
+            'End_Rate': round(end_val, 1),
+            'Percent_Change': round(pct_change, 1),
+            'Improvement': 'Yes' if pct_change < 0 else 'No'
+        }
+    return None
+
+# Calculate improvements for all countries
+improvements = []
+for country in annual_diarrhea.columns:
+    result = calculate_improvement(annual_diarrhea[country])
+    if result:
+        improvements.append(result)
+
+improvement_df = pd.DataFrame(improvements)
+improvement_df = improvement_df.sort_values('Percent_Change')
+
+print("\n=== DISEASE RATE IMPROVEMENT (2000-2024) ===")
+print(improvement_df.to_string(index=False))
+
+# ============================================
+# PART 3: VISUALIZE TIME TRENDS
+# ============================================
+
+print("\n" + "=" * 60)
+print("PART 3: GENERATING TIME SERIES VISUALIZATIONS")
+print("=" * 60)
+
+# Create figure with subplots
+fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+fig.suptitle('Water Quality & Disease Time Series Analysis (2000-2024)', fontsize=16, fontweight='bold')
+
+# 1. Global diarrhea trend with 3-year moving average
+global_annual = df.groupby(df.index.year)['Diarrheal Cases per 100,000 people'].mean()
+global_ma = global_annual.rolling(window=3, center=True).mean()
+
+axes[0, 0].plot(global_annual.index, global_annual.values, 'o-', color='coral', alpha=0.7, label='Annual Mean')
+axes[0, 0].plot(global_ma.index, global_ma.values, 's-', color='darkred', linewidth=3, label='3-Year Moving Average')
+axes[0, 0].set_title('Global Diarrheal Disease Trend', fontsize=14)
+axes[0, 0].set_xlabel('Year')
+axes[0, 0].set_ylabel('Cases per 100,000 people')
+axes[0, 0].legend()
+axes[0, 0].grid(True, alpha=0.3)
+
+# 2. Top 5 most improved countries
+top_improved = improvement_df.head(5)['Country'].tolist()
+for country in top_improved:
+    country_data = annual_diarrhea[country].dropna()
+    axes[0, 1].plot(country_data.index, country_data.values, 'o-', linewidth=2, label=country)
+axes[0, 1].set_title('Top 5 Most Improved Countries', fontsize=14)
+axes[0, 1].set_xlabel('Year')
+axes[0, 1].set_ylabel('Diarrheal Cases per 100,000')
+axes[0, 1].legend()
+axes[0, 1].grid(True, alpha=0.3)
+
+# 3. Bottom 5 least improved/worsened countries
+bottom_improved = improvement_df.tail(5)['Country'].tolist()
+for country in bottom_improved:
+    country_data = annual_diarrhea[country].dropna()
+    axes[1, 0].plot(country_data.index, country_data.values, 'o-', linewidth=2, label=country)
+axes[1, 0].set_title('Bottom 5 Least Improved Countries', fontsize=14)
+axes[1, 0].set_xlabel('Year')
+axes[1, 0].set_ylabel('Diarrheal Cases per 100,000')
+axes[1, 0].legend()
+axes[1, 0].grid(True, alpha=0.3)
+
+# 4. Lead contamination trend (global)
+lead_annual = df.groupby(df.index.year)['Lead Concentration (µg/L)'].mean()
+axes[1, 1].plot(lead_annual.index, lead_annual.values, 'o-', color='purple', linewidth=2)
+axes[1, 1].axhline(y=10, color='red', linestyle='--', label='WHO Safety Limit (10 µg/L)')
+axes[1, 1].set_title('Global Lead Contamination Trend', fontsize=14)
+axes[1, 1].set_xlabel('Year')
+axes[1, 1].set_ylabel('Lead Concentration (µg/L)')
+axes[1, 1].legend()
+axes[1, 1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('time_series_disease_trends.png', dpi=300, bbox_inches='tight')
+plt.show()
+print("✓ Saved: time_series_disease_trends.png")
+
+# ============================================
+# PART 4: WATER SOURCE & TREATMENT TRENDS
+# ============================================
+
+print("\n" + "=" * 60)
+print("PART 4: WATER SOURCE & TREATMENT ADOPTION TRENDS")
+print("=" * 60)
+
+# Treatment adoption over time
+treatment_by_year = pd.crosstab(df.index.year, df['Water Treatment Method'], normalize='index') * 100
+
+print("\n✓ Treatment method distribution over time (%):")
+print(treatment_by_year.round(1).head(10))
+
+# Plot treatment adoption trends
+fig, ax = plt.subplots(figsize=(14, 6))
+treatment_by_year.plot(kind='line', marker='o', ax=ax, linewidth=2)
+ax.set_title('Water Treatment Adoption Trends (2000-2024)', fontsize=14, fontweight='bold')
+ax.set_xlabel('Year')
+ax.set_ylabel('Percentage of Samples (%)')
+ax.legend(title='Treatment Method')
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig('treatment_adoption_trends.png', dpi=300)
+plt.show()
+print("✓ Saved: treatment_adoption_trends.png")
+
+# ============================================
+# PART 5: LAG ANALYSIS - TREATMENT EFFECT
+# ============================================
+
+print("\n" + "=" * 60)
+print("PART 5: LAG ANALYSIS - TIME TO IMPACT")
+print("=" * 60)
+
+# Calculate year-over-year change in chlorination adoption
+chlorination_by_year = df[df['Water Treatment Method'] == 'Chlorination'].groupby(df.index.year).size()
+total_by_year = df.groupby(df.index.year).size()
+chlorination_pct = (chlorination_by_year / total_by_year * 100).fillna(0)
+
+# Calculate year-over-year change in diarrhea
+diarrhea_by_year = df.groupby(df.index.year)['Diarrheal Cases per 100,000 people'].mean()
+
+# Create DataFrame for lag analysis
+lag_df = pd.DataFrame({
+    'Year': diarrhea_by_year.index,
+    'Chlorination_%': chlorination_pct.values,
+    'Diarrhea_Rate': diarrhea_by_year.values
 })
-df['month'] = df['date'].dt.month
-df['quarter'] = df['date'].dt.quarter
+lag_df['Chlorination_Lag1'] = lag_df['Chlorination_%'].shift(1)
+lag_df['Chlorination_Lag2'] = lag_df['Chlorination_%'].shift(2)
+lag_df['Chlorination_Lag3'] = lag_df['Chlorination_%'].shift(3)
 
-# FIGURE 1: Time series (3-in-1)
-fig, axes = plt.subplots(3, 1, figsize=(12, 10))
+# Calculate correlations at different lags
+print("\n=== CORRELATION: CHLORINATION ADOPTION vs DISEASE REDUCTION ===")
+print(f"Same year correlation: {lag_df['Chlorination_%'].corr(lag_df['Diarrhea_Rate']):.3f}")
+print(f"1-year lag correlation: {lag_df['Chlorination_Lag1'].corr(lag_df['Diarrhea_Rate']):.3f}")
+print(f"2-year lag correlation: {lag_df['Chlorination_Lag2'].corr(lag_df['Diarrhea_Rate']):.3f}")
+print(f"3-year lag correlation: {lag_df['Chlorination_Lag3'].corr(lag_df['Diarrhea_Rate']):.3f}")
 
-# Daily
-daily = df.groupby('date')['sales'].sum()
-axes[0].plot(daily.index, daily.values, 'b-', linewidth=0.5, alpha=0.7)
-axes[0].set_title('Daily Sales (2023)')
-axes[0].set_ylabel('Sales ($)')
-axes[0].grid(True, alpha=0.3)
+# Visualize lag effect
+fig, ax = plt.subplots(figsize=(12, 6))
+ax2 = ax.twinx()
 
-# Monthly
-monthly = df.groupby('month')['sales'].sum()
-axes[1].bar(monthly.index, monthly.values, color='steelblue', edgecolor='black')
-axes[1].set_title('Monthly Sales')
-axes[1].set_xlabel('Month')
-axes[1].set_ylabel('Sales ($)')
-axes[1].set_xticks(range(1, 13))
+ax.plot(lag_df['Year'], lag_df['Chlorination_%'], 'b-o', linewidth=2, label='Chlorination Usage %')
+ax2.plot(lag_df['Year'], lag_df['Diarrhea_Rate'], 'r-s', linewidth=2, label='Diarrhea Rate')
 
-# Quarterly
-quarterly = df.groupby('quarter')['sales'].sum()
-axes[2].bar(quarterly.index, quarterly.values, color='darkblue', edgecolor='black')
-axes[2].set_title('Quarterly Sales')
-axes[2].set_xlabel('Quarter')
-axes[2].set_ylabel('Sales ($)')
-for i, v in enumerate(quarterly.values):
-    axes[2].text(quarterly.index[i], v + 500, f'${v:,.0f}', ha='center')
+ax.set_xlabel('Year')
+ax.set_ylabel('Chlorination Usage (%)', color='b')
+ax2.set_ylabel('Diarrhea Cases per 100,000', color='r')
+ax.set_title('Chlorination Adoption vs Diarrhea Rates (Lag Effect Visible)', fontsize=14)
 
 plt.tight_layout()
-plt.savefig('timeseries.png', dpi=150)
+plt.savefig('lag_analysis_chlorination.png', dpi=300)
 plt.show()
+print("✓ Saved: lag_analysis_chlorination.png")
 
-# FIGURE 2: Category charts (side-by-side)
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+# ============================================
+# PART 6: ANOMALY DETECTION
+# ============================================
 
-# Bar chart
-cat_sales = df.groupby('category')['sales'].sum().sort_values()
-bars = ax1.barh(cat_sales.index, cat_sales.values, color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'])
-ax1.set_title('Total Sales by Category')
-ax1.set_xlabel('Sales ($)')
-for i, v in enumerate(cat_sales.values):
-    ax1.text(v + 500, i, f'${v:,.0f}', va='center')
+print("\n" + "=" * 60)
+print("PART 6: ANOMALY DETECTION - OUTLIER YEARS")
+print("=" * 60)
 
-# Pie chart
-ax2.pie(cat_sales.values, labels=cat_sales.index, autopct='%1.1f%%',
-        colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'],
-        explode=[0.05 if i == len(cat_sales)-1 else 0 for i in range(len(cat_sales))])
-ax2.set_title('Market Share by Category')
+# Calculate Z-scores for each country's disease rates
+def detect_anomalies(country_data, threshold=2):
+    """Detect anomaly years using Z-score method"""
+    mean = country_data.mean()
+    std = country_data.std()
+    z_scores = (country_data - mean) / std
+    return country_data[abs(z_scores) > threshold]
+
+anomalies = []
+for country in annual_diarrhea.columns:
+    country_series = annual_diarrhea[country].dropna()
+    if len(country_series) > 5:  # Need enough data
+        anomalies_years = detect_anomalies(country_series)
+        for year, rate in anomalies_years.items():
+            anomalies.append({
+                'Country': country,
+                'Year': year,
+                'Diarrhea_Rate': round(rate, 1),
+                'Z_Score': round((rate - country_series.mean()) / country_series.std(), 2)
+            })
+
+anomaly_df = pd.DataFrame(anomalies)
+if not anomaly_df.empty:
+    print("\n=== DETECTED ANOMALIES (Disease Spikes) ===")
+    print(anomaly_df.sort_values('Z_Score', ascending=False).to_string(index=False))
+    
+    # Export anomalies
+    anomaly_df.to_csv('disease_anomaly_years.csv', index=False)
+    print("✓ Saved: disease_anomaly_years.csv")
+
+# ============================================
+# PART 7: FORECASTING TO 2030
+# ============================================
+
+print("\n" + "=" * 60)
+print("PART 7: SIMPLE FORECASTING TO 2030")
+print("=" * 60)
+
+# Prepare data for forecasting
+years = np.array(global_annual.index).reshape(-1, 1)
+rates = global_annual.values
+
+# Fit linear regression
+model = LinearRegression()
+model.fit(years, rates)
+
+# Generate forecast to 2030
+future_years = np.array(range(2025, 2031)).reshape(-1, 1)
+forecast = model.predict(future_years)
+
+# Calculate confidence interval (simplified)
+residuals = rates - model.predict(years)
+std_residuals = np.std(residuals)
+ci_upper = forecast + 1.96 * std_residuals
+ci_lower = forecast - 1.96 * std_residuals
+
+print("\n=== FORECAST: Global Diarrhea Rates ===")
+print(f"Current rate (2024): {global_annual.loc[2024]:.1f} cases/100k")
+print(f"Projected rate (2030): {forecast[-1]:.1f} cases/100k")
+print(f"Projected change: {forecast[-1] - global_annual.loc[2024]:.1f} cases/100k")
+print(f"95% Confidence Interval: [{ci_lower[-1]:.1f}, {ci_upper[-1]:.1f}]")
+
+# Visualize forecast
+fig, ax = plt.subplots(figsize=(14, 6))
+
+# Historical data
+ax.plot(global_annual.index, global_annual.values, 'b-o', label='Historical Data', linewidth=2)
+ax.plot(future_years, forecast, 'r--o', label='Forecast (2025-2030)', linewidth=2)
+ax.fill_between(future_years.flatten(), ci_lower, ci_upper, color='red', alpha=0.2, label='95% Confidence Interval')
+
+ax.axvline(x=2024, color='gray', linestyle='--', alpha=0.7)
+ax.text(2024.5, ax.get_ylim()[1]*0.9, 'Forecast Start', fontsize=10)
+
+ax.set_title('Global Diarrheal Disease Forecast to 2030', fontsize=14, fontweight='bold')
+ax.set_xlabel('Year')
+ax.set_ylabel('Diarrheal Cases per 100,000 people')
+ax.legend()
+ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('category_charts.png', dpi=150)
+plt.savefig('disease_forecast_2030.png', dpi=300)
 plt.show()
+print("✓ Saved: disease_forecast_2030.png")
 
-# Export summary (concise)
-with open('summary.txt', 'w') as f:
-    f.write("SALES ANALYSIS SUMMARY\n")
-    f.write("======================\n\n")
-    f.write(f"Period: {df['date'].min().date()} to {df['date'].max().date()}\n")
-    f.write(f"Total Sales: ${df['sales'].sum():,.2f}\n")
-    f.write(f"Best Month: {monthly.idxmax()} (${monthly.max():,.0f})\n")
-    f.write(f"Top Category: {cat_sales.index[-1]} (${cat_sales.values[-1]:,.0f})\n")
-    f.write(f"Category Share: {cat_sales.index[-1]} {cat_sales.values[-1]/cat_sales.sum()*100:.1f}%\n")
+# ============================================
+# PART 8: EXPORT TIME SERIES RESULTS
+# ============================================
 
-# Chart choice discussion
-discussion = """
-CHART DECISIONS:
-- Line chart: Optimal for continuous time trends, shows daily fluctuations
-- Bar charts (monthly/quarterly): Clear discrete time comparisons, easy aggregation
-- Horizontal bar chart: Better category label readability
-- Pie chart: Instant market share visualization, limited to 4-5 categories
+print("\n" + "=" * 60)
+print("PART 8: EXPORTING TIME SERIES RESULTS")
+print("=" * 60)
 
-FORMATTING:
-- Axis: $ prefix, thousands separator, proper rotation
-- Labels: Direct value annotations, no legend redundancy
-- Colors: Distinct, consistent across charts
-- Layout: Subplots for efficient space use
-"""
-with open('chart_discussion.txt', 'w') as f:
-    f.write(discussion)
+# 1. Annual disease rates by country
+annual_diarrhea.to_csv('annual_diarrhea_rates_by_country.csv')
+print("✓ Saved: annual_diarrhea_rates_by_country.csv")
 
-print("✓ Files saved: timeseries.png, category_charts.png, summary.txt, chart_discussion.txt")
+# 2. Country improvement rankings
+improvement_df.to_csv('country_improvement_rankings.csv', index=False)
+print("✓ Saved: country_improvement_rankings.csv")
+
+# 3. Treatment adoption time series
+treatment_by_year.to_csv('treatment_adoption_timeseries.csv')
+print("✓ Saved: treatment_adoption_timeseries.csv")
+
+# 4. Lag analysis results
+lag_df.to_csv('lag_analysis_chlorination_diarrhea.csv', index=False)
+print("✓ Saved: lag_analysis_chlorination_diarrhea.csv")
+
+# 5. Forecast results
+forecast_df = pd.DataFrame({
+    'Year': future_years.flatten(),
+    'Forecasted_Diarrhea_Rate': forecast.round(1),
+    'CI_Lower': ci_lower.round(1),
+    'CI_Upper': ci_upper.round(1)
+})
+forecast_df.to_csv('disease_forecast_2025_2030.csv', index=False)
+print("✓ Saved: disease_forecast_2025_2030.csv")
+
+# 6. Water quality trends
+water_quality_annual = df.groupby(df.index.year)[
+    ['Contaminant Level (ppm)', 'Lead Concentration (µg/L)', 
+     'Nitrate Level (mg/L)', 'Bacteria Count (CFU/mL)']
+].mean()
+water_quality_annual.to_csv('water_quality_annual_trends.csv')
+print("✓ Saved: water_quality_annual_trends.csv")
+
+# ============================================
+# PART 9: SUMMARY REPORT
+# ============================================
+
+print("\n" + "=" * 60)
+print("TIME SERIES ANALYSIS: KEY FINDINGS")
+print("=" * 60)
+
+# Most improved country
+best_country = improvement_df.iloc[0]
+print(f"\n1. MOST IMPROVED COUNTRY: {best_country['Country']}")
+print(f"   • Diarrhea rate: {best_country['Start_Rate']} → {best_country['End_Rate']} cases/100k")
+print(f"   • Change: {best_country['Percent_Change']}%")
+
+# Least improved country
+worst_country = improvement_df.iloc[-1]
+print(f"\n2. LEAST IMPROVED COUNTRY: {worst_country['Country']}")
+print(f"   • Diarrhea rate: {worst_country['Start_Rate']} → {worst_country['End_Rate']} cases/100k")
+print(f"   • Change: {worst_country['Percent_Change']}%")
+
+# Global trend direction
+global_start = global_annual.loc[min(global_annual.index, key=lambda x: abs(x-2000))]
+global_end = global_annual.loc[max(global_annual.index, key=lambda x: abs(x-2024))]
+global_change = ((global_end - global_start) / global_start) * 100
+print(f"\n3. GLOBAL TREND (2000-2024):")
+print(f"   • Global diarrhea rate: {global_start:.1f} → {global_end:.1f} cases/100k")
+print(f"   • Change: {global_change:.1f}%")
+
+# Treatment adoption
+current_treatment = treatment_by_year.loc[2024].sort_values(ascending=False)
+print(f"\n4. CURRENT TREATMENT PREFERENCES (2024):")
+for method, pct in current_treatment.head(3).items():
+    print(f"   • {method}: {pct:.1f}%")
+
+# Forecast
+print(f"\n5. 2030 FORECAST:")
+print(f"   • Projected global diarrhea rate: {forecast[-1]:.1f} cases/100k")
+print(f"   • Change from 2024: {forecast[-1] - global_end:.1f} cases/100k")
+
+print("\n" + "=" * 60)
+print("✓ TIME SERIES ANALYSIS COMPLETE")
+print("=" * 60)
